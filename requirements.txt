@@ -1,5 +1,6 @@
 --extra-index-url https://download.pytorch.org/whl/cu124
 
+--- 기본 모델 및 학습 관련 ---
 torch
 torchvision
 torchaudio
@@ -10,4 +11,14 @@ trl
 bitsandbytes
 accelerate
 tensorboard
-hf_xet
+
+--- API 서버 관련 ---
+fastapi
+uvicorn
+
+--- RAG 기능을 위해 추가된 라이브러리 ---
+langchain-community
+langchain
+sentence-transformers
+faiss-cpu
+pandas
