@@ -6,28 +6,23 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import os
 
-# --- 설정 ---
-# 1. Google Sheets에서 CSV로 다운로드할 파일 이름
-DATA_SOURCE_FILE = "restaurants_data.csv"
-# 2. 생성될 Vector DB 폴더 이름
-VECTOR_STORE_SAVE_PATH = "restaurant_faiss_index"
-# 3. 텍스트를 벡터로 변환할 임베딩 모델
+# --- 경로 설정 (새로운 폴더 구조에 맞게 수정) ---
+# 현재 파일(build_db.py)의 위치는 app/ 이므로, 상위 폴더로 이동(../) 후 각 폴더로 진입
+DATA_SOURCE_FILE = "../data/restaurants_data.csv"
+VECTOR_STORE_SAVE_PATH = "../models/restaurant_faiss_index"
 EMBEDDING_MODEL_NAME = "jhgan/ko-sbert-nli"
 
 
 def build_vector_store():
     """CSV 데이터를 읽어 FAISS Vector Store를 생성하고 로컬에 저장합니다."""
-    # 0. 데이터 파일 존재 여부 확인
     if not os.path.exists(DATA_SOURCE_FILE):
         print(f"🚨 에러: '{DATA_SOURCE_FILE}'을 찾을 수 없습니다.")
-        print("백엔드팀으로부터 데이터를 전달받아, 해당 이름으로 프로젝트 폴더에 저장해주세요.")
+        print("백엔드팀으로부터 데이터를 전달받아, 'data/' 폴더에 해당 이름으로 저장해주세요.")
         return
 
-    # 1. CSV 데이터 로드
     df = pd.read_csv(DATA_SOURCE_FILE)
     print(f"✅ 데이터 로딩 완료: 총 {len(df)}개의 맛집 데이터를 찾았습니다.")
 
-    # 2. 데이터를 LangChain이 이해할 수 있는 Document 형식으로 변환
     documents = []
     for _, row in df.iterrows():
         content = (
@@ -39,7 +34,6 @@ def build_vector_store():
         documents.append(Document(page_content=content, metadata=metadata))
     print(f"✅ {len(documents)}개의 맛집 정보를 Document 형식으로 변환했습니다.")
 
-    # 3. 임베딩 모델 로드
     print("임베딩 모델을 로딩합니다... (처음 실행 시 시간이 걸릴 수 있습니다)")
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL_NAME,
@@ -48,7 +42,6 @@ def build_vector_store():
     )
     print("✅ 임베딩 모델 로딩 완료.")
 
-    # 4. Vector Store 생성 및 저장
     print("Vector Store를 생성하고 저장합니다...")
     vectorstore = FAISS.from_documents(documents, embeddings)
     vectorstore.save_local(VECTOR_STORE_SAVE_PATH)
@@ -57,4 +50,3 @@ def build_vector_store():
 
 if __name__ == "__main__":
     build_vector_store()
-

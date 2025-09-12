@@ -12,18 +12,18 @@ import os
 # --- 기본 설정 ---
 app = FastAPI()
 
-# 모델 및 Vector DB 경로 설정
+# --- 경로 설정 (새로운 폴더 구조에 맞게 수정) ---
+# 현재 파일(main.py)의 위치는 app/ 이므로, 상위 폴더로 이동(../) 후 각 폴더로 진입
 BASE_MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct"
-FINETUNED_ADAPTER_PATH = "./chatbot_model"
-VECTOR_STORE_PATH = "restaurant_faiss_index"
+FINETUNED_ADAPTER_PATH = "../models/chatbot_model"
+VECTOR_STORE_PATH = "../models/restaurant_faiss_index"
 EMBEDDING_MODEL_NAME = "jhgan/ko-sbert-nli"
 
 
-# --- 모델 및 Vector Store 로드 (서버 시작 시 1회 실행) ---
+# --- 모델 및 Vector Store 로드 ---
 retriever = None
 print("모델 및 Vector Store 로딩을 시작합니다...")
 
-# Vector Store 로드
 if os.path.exists(VECTOR_STORE_PATH):
     try:
         embedding_model = HuggingFaceEmbeddings(
@@ -38,10 +38,9 @@ if os.path.exists(VECTOR_STORE_PATH):
         print(f"🚨 Vector Store 로딩 실패: {e}")
 else:
     print(f"🚨 경고: '{VECTOR_STORE_PATH}' 폴더를 찾을 수 없습니다.")
-    print("챗봇이 정상적으로 작동하려면 'build_restaurant_db.py'를 먼저 실행해야 합니다.")
+    print("챗봇이 정상적으로 작동하려면 'python app/build_db.py'를 먼저 실행해야 합니다.")
 
 
-# LLM 파이프라인 설정
 print("LLM 로딩 중...")
 chatbot_pipeline = pipeline("text-generation", model=BASE_MODEL_ID, device_map="auto", torch_dtype=torch.float16)
 chatbot_pipeline.model = PeftModel.from_pretrained(chatbot_pipeline.model, FINETUNED_ADAPTER_PATH)
@@ -70,7 +69,7 @@ PROMPT_TEMPLATE = """
 @app.post("/restaurant-chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not retriever:
-        return ChatResponse(response="챗봇의 데이터베이스가 준비되지 않았습니다. 'build_restaurant_db.py'를 실행했는지 확인해주세요.")
+        return ChatResponse(response="챗봇의 데이터베이스가 준비되지 않았습니다. 'python app/build_db.py'를 실행했는지 확인해주세요.")
 
     user_question = request.message
     retrieved_docs = retriever.invoke(user_question)
@@ -84,4 +83,3 @@ async def chat(request: ChatRequest):
 
     answer = result.split("[추천 답변]")[-1].strip()
     return ChatResponse(response=answer)
-
