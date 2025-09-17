@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+langchain
+langchain-community
+sqlalchemy
+langchain-huggingface
+transformers
+torch
+accelerate
+sentence-transformers
