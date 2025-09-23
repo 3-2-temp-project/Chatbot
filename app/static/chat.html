@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>지능형 맛집 추천 AI — 데모</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif; margin:0; background:#0b0f14; color:#e5edf5; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 24px; }
+    .msgs { padding: 12px; height: 60vh; overflow:auto; background:#0f1722; border:1px solid #1f2b3a; border-radius:12px; display:flex; flex-direction:column; }
+    .msg { max-width: 80%; padding:10px 12px; border-radius:10px; margin:8px 0; white-space: pre-wrap; }
+    .user { background:#1f2b3a; align-self:flex-end; }
+    .bot { background:#0b1220; align-self:flex-start; }
+    .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+    .btn { padding:6px 10px; border-radius:999px; border:1px solid #2a3a50; background:#1e2937; color:#e5edf5; cursor:pointer; }
+    .row { display:flex; gap:8px; margin-top:10px; }
+    input { flex:1; padding:10px; border-radius:8px; border:1px solid #1f2b3a; background:#0b1220; color:#e5edf5; }
+    button { padding:10px 14px; border-radius:8px; border:none; background:#10b981; color:#042014; font-weight:700; cursor:pointer; }
+    .tiny { font-size:12px; padding:6px 8px; background:#121a28; color:#9db0c4; border:1px solid #1f2b3a; }
+    .hint { color:#9db0c4; font-size:12px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h3>지능형 맛집 추천 AI — 데모 <small class="hint">API: <code id="apiLabel"></code></small></h3>
+
+    <div class="row">
+      <button id="resetBtn" class="tiny">대화 초기화(처음으로)</button>
+      <button id="lunchBtn" class="tiny">오늘 점심 뭐 먹지?</button>
+    </div>
+
+    <div id="msgs" class="msgs"></div>
+
+    <div class="row">
+      <input id="input" type="text" placeholder="예) 강남역 근처 한식으로 회식하기 좋은 곳" />
+      <button id="send">보내기</button>
+    </div>
+
+    <div class="hint">* 버튼 응답(type=buttons)이 오면 말풍선 아래에 동그란 버튼으로 표시됩니다.</div>
+  </div>
+
+  <script>
+    // ====== 설정 ======
+    const BASE_API = (localStorage.getItem('chat_api') || 'http://127.0.0.1:8000'); // 필요시 변경
+    const CHAT_ENDPOINT = `${BASE_API.replace(/\/$/, '')}/chat`;
+    document.getElementById('apiLabel').textContent = CHAT_ENDPOINT;
+
+    const sessionId = localStorage.getItem('chat_session_id') || `web-${Math.random().toString(36).slice(2,10)}`;
+    localStorage.setItem('chat_session_id', sessionId);
+
+    const msgs = document.getElementById('msgs');
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+
+    function addMsg(text, who='bot', buttons=[]) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ' + (who === 'user' ? 'user' : 'bot');
+      wrap.textContent = text;
+      msgs.appendChild(wrap);
+
+      if (buttons && buttons.length) {
+        const b = document.createElement('div');
+        b.className = 'buttons';
+        buttons.forEach(opt => {
+          const el = document.createElement('button');
+          el.className = 'btn';
+          el.textContent = opt;
+          el.onclick = () => {
+            addMsg(opt, 'user');
+            request(opt);
+          };
+          b.appendChild(el);
+        });
+        msgs.appendChild(b);
+      }
+
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    async function request(query) {
+      sendBtn.disabled = true;
+      try {
+        const res = await fetch(CHAT_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, query })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          addMsg(`서버 오류(${res.status}):\n` + t, 'bot');
+          return;
+        }
+        const data = await res.json();
+        const { type, answer, options } = data;
+        addMsg(answer || '(빈 응답)', 'bot', type === 'buttons' ? (options || []) : []);
+      } catch (e) {
+        addMsg('요청 실패: ' + e.message, 'bot');
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener('click', () => {
+      const q = input.value.trim();
+      if (!q) return;
+      addMsg(q, 'user');
+      input.value = '';
+      request(q);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendBtn.click();
+    });
+
+    document.getElementById('resetBtn').onclick = () => {
+      addMsg('처음으로', 'user');
+      request('처음으로');
+    };
+
+    document.getElementById('lunchBtn').onclick = () => {
+      addMsg('오늘 점심 뭐 먹지?', 'user');
+      request('오늘 점심 뭐 먹지?');
+    };
+
+    // 첫 메시지 안내
+    addMsg('안녕하세요! 지역을 알려주시면 시작할게요. 예) 강남역');
+  </script>
+</body>
+</html>
