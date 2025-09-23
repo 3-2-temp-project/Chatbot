@@ -1,29 +1,36 @@
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse # 👈 StreamingResponse import 추가
-from app.services.chatbot_logic import get_ai_response_stream # 👈 스트리밍 전용 함수 import
-from app.models import ChatRequest
+import sys
+import os
+
+# 이 파일이 uvicorn으로 직접 실행될 때를 대비한 경로 설정
+# 예: uvicorn app.main:app --reload
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+
+from fastapi import FastAPI, HTTPException
+from app.services.chatbot_logic import get_ai_response
+from app.models import ChatRequest, ChatResponse
 
 app = FastAPI(
     title="지능형 맛집 추천 AI 챗봇 API",
     description="LangChain과 Text-to-SQL을 사용한 맛집 추천 챗봇입니다.",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-# 스트리밍 응답을 위한 새로운 엔드포인트
-@app.post("/chat/stream", summary="챗봇 응답 실시간 생성")
-async def chat_with_agent_stream(request: ChatRequest):
+@app.post("/chat", response_model=ChatResponse, summary="챗봇 응답 생성")
+async def chat_with_agent(request: ChatRequest):
     """
-    사용자 질문을 받아 AI 에이전트의 답변을 실시간 스트림으로 반환합니다.
+    사용자 질문을 받아 AI 에이전트의 답변을 반환합니다.
     """
-    # get_ai_response_stream 함수는 제너레이터(generator)여야 합니다.
-    # 이 함수는 텍스트 조각(token)을 하나씩 생성하여 yield합니다.
-    return StreamingResponse(
-        get_ai_response_stream(request.session_id, request.query),
-        media_type="text/event-stream"
-    )
+    if not request.query or not request.session_id:
+        raise HTTPException(status_code=400, detail="session_id와 query를 모두 입력해주세요.")
 
-# 기존 엔드포인트는 테스트나 비-스트리밍용으로 남겨둘 수 있습니다.
-# from app.models import ChatResponse
-# from app.services.chatbot_logic import get_ai_response
-# @app.post("/chat", response_model=ChatResponse, summary="챗봇 응답 생성")
-# ...
+    try:
+        ai_response = get_ai_response(request.session_id, request.query)
+        return ai_response
+    except Exception as e:
+        print(f"Server Error: {e}")
+        raise HTTPException(status_code=500, detail=f"서버 오류 발생: {str(e)}")
+
+@app.get("/", summary="API 상태 확인")
+def read_root():
+    """API가 정상 동작하는지 확인하는 기본 엔드포인트"""
+    return {"message": "지능형 맛집 추천 AI 챗봇 API가 동작 중입니다."}

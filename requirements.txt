@@ -6,6 +6,7 @@ langchain-huggingface
 numpy
 pydantic
 PyYAML
+python-dotenv
 requests
 safetensors
 scikit-learn
