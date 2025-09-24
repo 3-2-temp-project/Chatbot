@@ -1,13 +1,19 @@
 from pydantic import BaseModel
 from typing import Optional, List
 
-# 요청 본문을 위한 Pydantic 모델
+# /chat 요청/응답
 class ChatRequest(BaseModel):
     session_id: str
     query: str
 
-# 응답 본문을 위한 Pydantic 모델
 class ChatResponse(BaseModel):
     type: str
     answer: str
     options: Optional[List[str]] = None
+
+# /event (사용자 행동 로그 적재)
+class EventRequest(BaseModel):
+    session_id: str
+    event: str                   # 'impression' | 'click' | 'favorite' ...
+    restaurant_id: Optional[int] = None
+    value: Optional[str] = None
