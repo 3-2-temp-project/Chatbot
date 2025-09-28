@@ -1,24 +1,33 @@
 import sys
 import os
-
-# 프로젝트 루트(Chatbot)를 PYTHONPATH에 추가
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.services.chatbot_logic import get_ai_response, _log_event, recalc_stats
-from app.models import ChatRequest, ChatResponse, EventRequest
+from app.models import ChatRequest, ChatResponse, EventRequest, db
+from app.core.config import DATABASE_URI
 
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+
+# ===== Flask + DB 초기화 (FastAPI와 같이 사용) =====
+flask_app = Flask(__name__)
+flask_app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
+flask_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db.init_app(flask_app)
+with flask_app.app_context():
+    db.create_all()
+
+# ===== FastAPI =====
 app = FastAPI(
     title="지능형 맛집 추천 AI 챗봇 API",
     description="LangChain과 Text-to-SQL을 사용한 맛집 추천 챗봇입니다.",
     version="1.0.0",
 )
 
-# CORS (필요 시 도메인 추가)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -36,7 +45,6 @@ app.add_middleware(
 
 # 정적 데모 서빙
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-print("STATIC_DIR:", STATIC_DIR, "exists:", os.path.exists(STATIC_DIR))
 app.mount("/demo", StaticFiles(directory=STATIC_DIR, html=True), name="demo")
 
 @app.get("/demo", include_in_schema=False)
@@ -58,12 +66,11 @@ async def chat_with_agent(request: ChatRequest):
         print(f"Server Error: {e}")
         raise HTTPException(status_code=500, detail=f"서버 오류 발생: {str(e)}")
 
-# 사용자 행동 이벤트 적재 (옵션: 클릭/즐겨찾기 등)
+# 이벤트
 @app.post("/event", summary="사용자 이벤트 적재")
 async def push_event(req: EventRequest):
     try:
         _log_event(req.event, req.session_id, req.restaurant_id, req.value)
-        # 클릭/즐겨찾기는 신호가 강하므로 즉시 반영하면 체감이 좋음
         if req.event in ("click", "favorite"):
             recalc_stats()
         return {"ok": True}

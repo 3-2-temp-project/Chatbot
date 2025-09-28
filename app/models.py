@@ -1,7 +1,33 @@
+from flask_sqlalchemy import SQLAlchemy
 from pydantic import BaseModel
 from typing import Optional, List
 
-# /chat 요청/응답
+db = SQLAlchemy()
+
+# ===== SQLAlchemy ORM =====
+class RestaurantInfo(db.Model):
+    __tablename__ = 'restaurant_info'
+    res_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    res_name = db.Column(db.String(64), nullable=False)
+    address = db.Column(db.String(255), nullable=False)
+    lat = db.Column(db.Float, nullable=False)
+    lng = db.Column(db.Float, nullable=False)
+    res_phone = db.Column(db.String(32), nullable=True)
+    category = db.Column(db.String(32), nullable=True)
+    price = db.Column(db.Integer, nullable=True)
+    score = db.Column(db.Float, nullable=True)
+
+class User(db.Model):
+    __tablename__ = 'users'
+    user_num = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(32), unique=True, nullable=False)
+    user_name = db.Column(db.String(32), nullable=False)
+    user_nickname = db.Column(db.String(32), nullable=False)
+    password = db.Column(db.String(32), nullable=False)
+    email = db.Column(db.String(32), unique=True, nullable=False)
+    date = db.Column(db.TIMESTAMP, nullable=True)
+
+# ===== FastAPI Request/Response 모델 =====
 class ChatRequest(BaseModel):
     session_id: str
     query: str
@@ -11,7 +37,6 @@ class ChatResponse(BaseModel):
     answer: str
     options: Optional[List[str]] = None
 
-# /event (사용자 행동 로그 적재)
 class EventRequest(BaseModel):
     session_id: str
     event: str                   # 'impression' | 'click' | 'favorite' ...

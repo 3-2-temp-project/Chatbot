@@ -1,3 +1,4 @@
+# === Core ===
 accelerate
 fastapi
 langchain
@@ -16,3 +17,8 @@ starlette
 torch
 transformers
 uvicorn[standard]
+
+# === Database ===
+Flask
+Flask-SQLAlchemy
+psycopg2-binary
