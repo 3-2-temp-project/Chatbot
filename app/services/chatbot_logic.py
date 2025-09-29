@@ -23,7 +23,7 @@ llm = HuggingFacePipeline.from_model_id(
         "do_sample": True if config.LLM_TEMPERATURE > 0 else False,
         "return_full_text": False,
     },
-    device=0,  # CPU
+    device=0,
 )
 
 

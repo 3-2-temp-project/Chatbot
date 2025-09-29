@@ -17,6 +17,8 @@ starlette
 torch
 transformers
 uvicorn[standard]
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 
 # === Database ===
 Flask
