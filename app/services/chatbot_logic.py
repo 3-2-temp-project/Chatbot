@@ -23,7 +23,7 @@ llm = HuggingFacePipeline.from_model_id(
         "do_sample": True if config.LLM_TEMPERATURE > 0 else False,
         "return_full_text": False,
     },
-    device=-1,  # CPU
+    device=0,  # CPU
 )
 
 
@@ -302,22 +302,15 @@ def _fallback_sql_from_slots(progress: dict) -> str:
     )
 
 
-def _extract_names_from_raw(raw: str) -> list[str]:
+def _extract_names_from_raw(rows: list[tuple]) -> list[str]:
     """
-    LangChain SQLDatabase 결과 문자열(raw)에서 식당 이름만 추출
-    (행렬 형태 파싱용)
+    SQL 실행 결과 (list of tuples)에서 식당 이름만 추출
+    예: [(1, '새벽집 강남', '한식', '강남역', 4.4), ...] → ['새벽집 강남', ...]
     """
-    lines = [l for l in raw.strip().splitlines() if l.strip()]
-    names = []
-    if len(lines) >= 2 and "|" in lines[0]:
-        header = [h.strip() for h in lines[0].split("|")]
-        idx = {h: i for i, h in enumerate(header)}
-        if "name" in idx:
-            for row in lines[1:]:
-                cols = [c.strip() for c in row.split("|")]
-                if len(cols) > idx["name"]:
-                    names.append(cols[idx["name"]])
-    return names
+    if not rows:
+        return []
+    return [row[1] for row in rows if len(row) > 1]
+
 
 def _names_to_ids(names: list[str]) -> list[int]:
     """식당 이름 목록을 받아 DB에서 id 리스트 반환"""
@@ -402,37 +395,33 @@ def get_ai_response(session_id: str, user_query: str):
         SELECT name, category, location, rating
         FROM restaurants
         WHERE location LIKE '%{_esc(progress['location'])}%'
-          AND category = '{_esc(progress['category'])}'
+        AND category = '{_esc(progress['category'])}'
         ORDER BY rating DESC
         LIMIT 1;
         """
         raw = _execute_sql(sql)
 
         # impression 로깅 + 즉시 재계산
-        names = _extract_names_from_raw(raw)
+        names = [row[0] for row in raw]  # 첫 번째 컬럼이 name
         for rid in _names_to_ids(names):
             _log_event("impression", session_id, rid, None)
         recalc_stats()
 
-        if raw.strip() in ("[]", ""):
+        if not raw:  # 결과 없을 때
             answer = prompts.NO_RESULT_MESSAGE.format(
                 location=progress["location"], category=progress["category"]
             )
-        else:
-            lines = [l for l in raw.splitlines() if l.strip()]
-            if len(lines) >= 2 and "|" in lines[0]:
-                cols = [c.strip() for c in lines[1].split("|")]
-                name, cat, loc, rating = cols[:4]
-                answer = prompts.TODAY_LUNCH_PROMPT.format(
-                    name=name, category=cat, location=loc, rating=rating
-                ) + prompts.ASK_SIMILAR_RESTAURANT
-            else:
-                answer = _render_results(raw)
+        else:  # 결과 있을 때
+            name, cat, loc, rating = raw[0][:4]
+            answer = prompts.TODAY_LUNCH_PROMPT.format(
+                name=name, category=cat, location=loc, rating=rating
+            ) + prompts.ASK_SIMILAR_RESTAURANT
 
         progress.pop("last_question", None)
         progress.pop("_today_lunch", None)
         user_progress[session_id] = progress
         return {"type": "text", "answer": answer, "options": None}
+
 
     # (7) 일반 추천: LLM → SQL 생성 → 실행
     try:
@@ -461,7 +450,7 @@ def get_ai_response(session_id: str, user_query: str):
             _log_event("impression", session_id, rid, None)
         recalc_stats()
 
-        if not raw or raw.strip() in ("[]",):
+        if not raw:
             final_answer = prompts.NO_RESULT_MESSAGE.format(
                 location=progress.get("location"),
                 category=progress.get("category"),
@@ -469,6 +458,7 @@ def get_ai_response(session_id: str, user_query: str):
         else:
             rendered = _render_results(raw)
             final_answer = rendered + prompts.ASK_SIMILAR_RESTAURANT
+
 
         progress.pop("last_question", None)
         user_progress[session_id] = progress
