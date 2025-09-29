@@ -28,7 +28,7 @@ llm = HuggingFacePipeline.from_model_id(
 
 
 def setup_database():
-    """PoC용 SQLite: 스키마 보장 + 비어 있으면 샘플 데이터 시드."""
+    """PoC용 PostgreSQL: 스키마 보장 + 비어 있으면 샘플 데이터 시드."""
     os.makedirs(os.path.join(config.BASE_DIR, "data"), exist_ok=True)
     engine = create_engine(config.DATABASE_URI)
 
@@ -36,18 +36,19 @@ def setup_database():
         # --- 기본 스키마 ---
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS restaurants (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             category TEXT NOT NULL,        -- 한식/일식/중식/양식
             location TEXT NOT NULL,        -- 강남역/판교역/정자동/...
             rating REAL,                   -- 0~5
-            has_private_room BOOLEAN,      -- 1: 룸 有
+            has_private_room BOOLEAN,      -- true/false
             recommended_for TEXT           -- 오찬/접대/회식 등
         );
         """)
+
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS biz_spend (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             restaurant_id INTEGER REFERENCES restaurants(id),
             agency TEXT,
             spend_date DATE,
@@ -59,14 +60,15 @@ def setup_database():
         # --- 행동 로그 / 집계 스키마 ---
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS user_events (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             session_id TEXT,
             restaurant_id INTEGER,
             event TEXT,                -- 'impression','click','favorite' 등
             value TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS restaurant_stats (
             restaurant_id INTEGER PRIMARY KEY,
@@ -85,39 +87,38 @@ def setup_database():
         cnt = conn.execute(text("SELECT COUNT(*) FROM restaurants")).scalar()
         if not cnt:
             restaurants = [
-                # 강남역
-                ("새벽집 강남",     "한식", "강남역", 4.4, 1, "회식"),
-                ("진가와 강남",     "일식", "강남역", 4.6, 1, "접대"),
-                ("마라공방 강남",   "중식", "강남역", 4.5, 1, "회식"),
-                ("청키면가 강남",   "중식", "강남역", 4.2, 0, "오찬"),
-                ("우래옥 강남",     "한식", "강남역", 4.5, 1, "접대"),
-                # 삼성역
-                ("진대감 삼성",     "한식", "삼성역", 4.6, 1, "회식"),
-                ("봉피양 삼성",     "한식", "삼성역", 4.5, 1, "접대"),
-                ("팔선생 삼성",     "중식", "삼성역", 4.3, 0, "오찬"),
-                # 판교역
-                ("취향중식 판교",   "중식", "판교역", 4.5, 1, "회식"),
-                ("스시야 판교",     "일식", "판교역", 4.5, 1, "접대"),
-                ("봉피양 판교",     "한식", "판교역", 4.4, 0, "오찬"),
-                ("오스테리아 오르조","양식","판교역", 4.7, 0, "오찬"),
-                # 홍대입구
-                ("초마 홍대",       "중식", "홍대입구", 4.4, 0, "오찬"),
-                ("뜨락 홍대",       "한식", "홍대입구", 4.2, 0, "오찬"),
-                # 정자동
-                ("정자 스시",       "일식", "정자동", 4.6, 1, "접대"),
-                ("정자동 마라탕",   "중식", "정자동", 4.3, 0, "오찬"),
-                # 수원 인계동
-                ("인계 라멘",       "일식", "수원 인계동", 4.2, 0, "오찬"),
-                ("인계 양꼬치",     "중식", "수원 인계동", 4.5, 0, "회식"),
-                # 일산 라페스타
-                ("라페 라멘",       "일식", "일산 라페스타", 4.1, 0, "오찬"),
-                ("라페 차이",       "중식", "일산 라페스타", 4.2, 0, "오찬"),
+                ("새벽집 강남",     "한식", "강남역", 4.4, True, "회식"),
+                ("진가와 강남",     "일식", "강남역", 4.6, True, "접대"),
+                ("마라공방 강남",   "중식", "강남역", 4.5, True, "회식"),
+                ("청키면가 강남",   "중식", "강남역", 4.2, False, "오찬"),
+                ("우래옥 강남",     "한식", "강남역", 4.5, True, "접대"),
+                ("진대감 삼성",     "한식", "삼성역", 4.6, True, "회식"),
+                ("봉피양 삼성",     "한식", "삼성역", 4.5, True, "접대"),
+                ("팔선생 삼성",     "중식", "삼성역", 4.3, False, "오찬"),
+                ("취향중식 판교",   "중식", "판교역", 4.5, True, "회식"),
+                ("스시야 판교",     "일식", "판교역", 4.5, True, "접대"),
+                ("봉피양 판교",     "한식", "판교역", 4.4, False, "오찬"),
+                ("오스테리아 오르조","양식","판교역", 4.7, False, "오찬"),
+                ("초마 홍대",       "중식", "홍대입구", 4.4, False, "오찬"),
+                ("뜨락 홍대",       "한식", "홍대입구", 4.2, False, "오찬"),
+                ("정자 스시",       "일식", "정자동", 4.6, True, "접대"),
+                ("정자동 마라탕",   "중식", "정자동", 4.3, False, "오찬"),
+                ("인계 라멘",       "일식", "수원 인계동", 4.2, False, "오찬"),
+                ("인계 양꼬치",     "중식", "수원 인계동", 4.5, False, "회식"),
+                ("라페 라멘",       "일식", "일산 라페스타", 4.1, False, "오찬"),
+                ("라페 차이",       "중식", "일산 라페스타", 4.2, False, "오찬"),
             ]
             for row in restaurants:
-                conn.exec_driver_sql(
-                    "INSERT INTO restaurants (name, category, location, rating, has_private_room, recommended_for) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    row,
+                conn.execute(
+                    text("INSERT INTO restaurants (name, category, location, rating, has_private_room, recommended_for) VALUES (:name, :category, :location, :rating, :has_private_room, :recommended_for)"),
+                    {
+                        "name": row[0],
+                        "category": row[1],
+                        "location": row[2],
+                        "rating": row[3],
+                        "has_private_room": row[4],
+                        "recommended_for": row[5],
+                    }
                 )
 
             # 업추비 더미
@@ -131,11 +132,11 @@ def setup_database():
                 (name_id["취향중식 판교"],   "성남시 일자리과",   "2025-09-05", 190000, "업무협의"),
             ]
             for r_id, agency, d, amount, purpose in spend:
-                conn.exec_driver_sql(
-                    "INSERT INTO biz_spend (restaurant_id, agency, spend_date, amount_krw, purpose) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (r_id, agency, d, amount, purpose),
+                conn.execute(
+                    text("INSERT INTO biz_spend (restaurant_id, agency, spend_date, amount_krw, purpose) VALUES (:r_id, :agency, :d, :amount, :purpose)"),
+                    {"r_id": r_id, "agency": agency, "d": d, "amount": amount, "purpose": purpose}
                 )
+
 
 
 setup_database()
@@ -178,17 +179,24 @@ def _log_event(event: str, session_id: str, restaurant_id: int | None = None, va
 def recalc_stats():
     engine = create_engine(config.DATABASE_URI)
     with engine.begin() as conn:
+        # PostgreSQL에서는 INSERT ... ON CONFLICT 구문 사용
         conn.exec_driver_sql("""
-        INSERT OR REPLACE INTO restaurant_stats(restaurant_id, impressions_7d, impressions_30d, clicks_7d, clicks_30d)
+        INSERT INTO restaurant_stats(restaurant_id, impressions_7d, impressions_30d, clicks_7d, clicks_30d)
         SELECT r.id,
-               SUM(CASE WHEN ue.event='impression' AND ue.created_at >= datetime('now','-7 day')  THEN 1 ELSE 0 END),
-               SUM(CASE WHEN ue.event='impression' AND ue.created_at >= datetime('now','-30 day') THEN 1 ELSE 0 END),
-               SUM(CASE WHEN ue.event='click'      AND ue.created_at >= datetime('now','-7 day')  THEN 1 ELSE 0 END),
-               SUM(CASE WHEN ue.event='click'      AND ue.created_at >= datetime('now','-30 day') THEN 1 ELSE 0 END)
+               SUM(CASE WHEN ue.event='impression' AND ue.created_at >= NOW() - INTERVAL '7 days'  THEN 1 ELSE 0 END),
+               SUM(CASE WHEN ue.event='impression' AND ue.created_at >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN ue.event='click'      AND ue.created_at >= NOW() - INTERVAL '7 days'  THEN 1 ELSE 0 END),
+               SUM(CASE WHEN ue.event='click'      AND ue.created_at >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END)
         FROM restaurants r
         LEFT JOIN user_events ue ON ue.restaurant_id = r.id
-        GROUP BY r.id;
+        GROUP BY r.id
+        ON CONFLICT (restaurant_id) DO UPDATE
+        SET impressions_7d = EXCLUDED.impressions_7d,
+            impressions_30d = EXCLUDED.impressions_30d,
+            clicks_7d = EXCLUDED.clicks_7d,
+            clicks_30d = EXCLUDED.clicks_30d;
         """)
+
         conn.exec_driver_sql("""
         UPDATE restaurant_stats
         SET spend_cnt = COALESCE((
@@ -198,17 +206,19 @@ def recalc_stats():
               SELECT MAX(spend_date) FROM biz_spend b WHERE b.restaurant_id = restaurant_stats.restaurant_id
             );
         """)
+
         conn.exec_driver_sql("""
         UPDATE restaurant_stats
         SET popularity_score =
               0.55 * (SELECT COALESCE(rating,0)/5.0 FROM restaurants r WHERE r.id = restaurant_stats.restaurant_id)
-            + 0.25 * log(1 + COALESCE(clicks_30d,0))
-            + 0.15 * log(1 + COALESCE(spend_cnt,0))
+            + 0.25 * LOG(1 + COALESCE(clicks_30d,0))
+            + 0.15 * LOG(1 + COALESCE(spend_cnt,0))
             + 0.05 * CASE
-                WHEN COALESCE(last_spend_date,'1970-01-01') >= date('now','-90 day') THEN 1
+                WHEN COALESCE(last_spend_date,'1970-01-01') >= NOW() - INTERVAL '90 days' THEN 1
                 ELSE 0
               END;
         """)
+
 
 
 # =========================
@@ -266,9 +276,12 @@ def _fallback_sql_from_slots(progress: dict) -> str:
     cat = _esc(progress.get("category", ""))
     purp = progress.get("purpose", "")
     where = []
-    if loc: where.append(f"r.location LIKE '%{loc}%'")
-    if cat: where.append(f"r.category = '{cat}'")
-    if "회식" in purp: where.append("r.has_private_room = 1")
+    if loc:
+        where.append(f"r.location LIKE '%{loc}%'")
+    if cat:
+        where.append(f"r.category = '{cat}'")
+    if "회식" in purp:
+        where.append("r.has_private_room = TRUE")  # PostgreSQL BOOLEAN 호환
     where_sql = " AND ".join(where) if where else "1=1"
     return (
         "SELECT r.id, r.name, r.category, r.location, r.rating "
@@ -278,6 +291,7 @@ def _fallback_sql_from_slots(progress: dict) -> str:
         "ORDER BY COALESCE(s.popularity_score, r.rating/5.0) DESC "
         "LIMIT 10;"
     )
+
 
 def _extract_names_from_raw(raw: str) -> list[str]:
     lines = [l for l in raw.strip().splitlines() if l.strip()]
