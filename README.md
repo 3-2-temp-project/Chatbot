@@ -20,4 +20,5 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 
 # API 테스트
-# 웹 브라우저를 열고 http://127.0.0.1:8000/docs      접속해서 챗봇 API를 테스트해보세요!
+# 웹 브라우저를 열고 http://127.0.0.1:8000/docs   (개발자용)   접속해서 챗봇 API를 테스트해보세요!
+# 웹 브라우저를 열고 http://127.0.0.1:8000/demo   (임시 챗봇 html)
