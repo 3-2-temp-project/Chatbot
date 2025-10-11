@@ -1,5 +1,6 @@
 import os
 import re
+import torch
 from sqlalchemy import create_engine, text
 from langchain_community.utilities import SQLDatabase
 from langchain_huggingface import HuggingFacePipeline
@@ -9,10 +10,9 @@ from app.core import config
 import app.services.prompts as prompts
 
 
-# =========================
-# DB & LLM 준비
-# =========================
 db = SQLDatabase.from_uri(config.DATABASE_URI)
+
+USE_GPU = torch.cuda.is_available()
 
 llm = HuggingFacePipeline.from_model_id(
     model_id=config.LLM_MODEL_ID,
@@ -23,21 +23,15 @@ llm = HuggingFacePipeline.from_model_id(
         "do_sample": True if config.LLM_TEMPERATURE > 0 else False,
         "return_full_text": False,
     },
-    device=-1,
+    device=0 if USE_GPU else -1,
 )
 
 
 def setup_database():
-    """
-    PostgreSQL 초기화 함수
-    - DB 스키마 생성 (restaurants, biz_spend, user_events, restaurant_stats)
-    - restaurants 테이블이 비어있으면 샘플 데이터와 업추비 더미 데이터를 추가
-    """
     os.makedirs(os.path.join(config.BASE_DIR, "data"), exist_ok=True)
     engine = create_engine(config.DATABASE_URI)
 
     with engine.begin() as conn:
-        # --- 기본 스키마 ---
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS restaurants (
             id SERIAL PRIMARY KEY,
@@ -86,10 +80,8 @@ def setup_database():
         );
         """)
 
-        # --- 샘플 데이터 시드 ---
         cnt = conn.execute(text("SELECT COUNT(*) FROM restaurants")).scalar()
         if not cnt:
-            # 예시 맛집 삽입
             restaurants = [
                 ("새벽집 강남", "한식", "강남역", 4.4, True, "회식"),
                 ("진가와 강남", "일식", "강남역", 4.6, True, "접대"),
@@ -122,8 +114,8 @@ def setup_database():
                     }
                 )
 
-            # 업추비 데이터 더미
             name_id = dict((v, k) for (k, v) in conn.execute(text("SELECT id, name FROM restaurants")))
+
             spend = [
                 (name_id["마라공방 강남"], "서울시 경제정책과", "2025-08-12", 180000, "업무협의 오찬"),
                 (name_id["마라공방 강남"], "서울시 경제정책과", "2025-09-03", 240000, "간담회"),
@@ -141,22 +133,10 @@ def setup_database():
 
 
 setup_database()
-
-# 세션 진행상태(간단 메모리)
 user_progress = {}
 
 
-# =========================
-# 유틸: 질의 파싱
-# =========================
-
 def parse_initial_query(query: str, progress: dict) -> dict:
-    """
-    사용자가 입력한 문장에서 슬롯(location, category, purpose)을 추출
-    - 위치 (예: 강남역, 수원시 등)
-    - 카테고리 (한식, 중식, 일식, 양식)
-    - 목적 (오찬, 접대, 회식)
-    """
     loc = re.search(r"(\S+역|\S+동|\S+시|\S+구)", query)
     if loc:
         progress["location"] = loc.group(0)
@@ -169,13 +149,7 @@ def parse_initial_query(query: str, progress: dict) -> dict:
     return progress
 
 
-# =========================
-# 이벤트 로깅 & 집계
-# =========================
 def _log_event(event: str, session_id: str, restaurant_id: int | None = None, value: str | None = None):
-    """
-    user_events 테이블에 사용자 행동(노출, 클릭, 즐겨찾기 등)을 기록
-    """
     try:
         engine = create_engine(config.DATABASE_URI)
         with engine.begin() as conn:
@@ -189,12 +163,6 @@ def _log_event(event: str, session_id: str, restaurant_id: int | None = None, va
 
 
 def recalc_stats():
-    """
-    restaurant_stats 테이블 업데이트
-    - 최근 7일/30일 노출/클릭 수 집계
-    - 업추비 집계 (횟수, 마지막 사용일)
-    - popularity_score(인기도 점수) 갱신
-    """
     engine = create_engine(config.DATABASE_URI)
     with engine.begin() as conn:
         conn.exec_driver_sql("""
@@ -230,14 +198,9 @@ def recalc_stats():
         """)
 
 
-
-# =========================
-# SQL 가드레일 & 폴백
-# =========================
 _ALLOWED_TABLES = {"restaurants"}
 
 def _is_safe_sql(sql: str) -> bool:
-    """SQL이 SELECT 문으로 시작하고 위험한 키워드가 없는지 검사"""
     s = sql.strip().lower()
     if not s.startswith("select"):
         return False
@@ -247,7 +210,6 @@ def _is_safe_sql(sql: str) -> bool:
     return True
 
 def _is_schema_safe(sql: str) -> bool:
-    """허용된 테이블만 사용하는지 검사 (JOIN, CTE, 서브쿼리 금지)"""
     s = sql.lower()
     if " join " in s or " with " in s or ("select" in s[1:] and "(" in s and ")" in s):
         return False
@@ -255,20 +217,17 @@ def _is_schema_safe(sql: str) -> bool:
     return all(t in _ALLOWED_TABLES for t in tables)
 
 def _normalize_sql(sql: str) -> str:
-    """LIMIT 절이 없으면 LIMIT 10 추가"""
     if re.search(r"\blimit\b", sql, flags=re.I) is None:
         sql = sql.rstrip(";") + " LIMIT 10;"
     return sql
 
 def _execute_sql(sql: str):
-    """Postgres 쿼리 실행 후 튜플 리스트 반환"""
     engine = create_engine(config.DATABASE_URI)
     with engine.begin() as conn:
         result = conn.execute(text(sql))
         return result.fetchall()
 
 def _render_results(rows: list[tuple]) -> str:
-    """쿼리 결과를 사람이 읽기 좋은 문자열로 변환"""
     if not rows:
         return ""
     items = []
@@ -278,14 +237,9 @@ def _render_results(rows: list[tuple]) -> str:
     return "\n".join(items)
 
 def _esc(v: str) -> str:
-    """SQL 인젝션 방지를 위해 작은 따옴표 이스케이프"""
     return str(v).replace("'", "''")[:50] if v else ""
 
 def _fallback_sql_from_slots(progress: dict) -> str:
-    """
-    LLM이 안전하지 않은 SQL을 생성했을 경우,
-    직접 location/category/purpose 정보를 이용해 SQL 생성 (백업용)
-    """
     loc = _esc(progress.get("location", "")); cat = _esc(progress.get("category", "")); purp = progress.get("purpose", "")
     where = []
     if loc: where.append(f"r.location LIKE '%{loc}%'")
@@ -303,17 +257,12 @@ def _fallback_sql_from_slots(progress: dict) -> str:
 
 
 def _extract_names_from_raw(rows: list[tuple]) -> list[str]:
-    """
-    SQL 실행 결과 (list of tuples)에서 식당 이름만 추출
-    예: [(1, '새벽집 강남', '한식', '강남역', 4.4), ...] → ['새벽집 강남', ...]
-    """
     if not rows:
         return []
     return [row[1] for row in rows if len(row) > 1]
 
 
 def _names_to_ids(names: list[str]) -> list[int]:
-    """식당 이름 목록을 받아 DB에서 id 리스트 반환"""
     if not names: return []
     engine = create_engine(config.DATABASE_URI)
     with engine.begin() as conn:
@@ -325,43 +274,27 @@ def _names_to_ids(names: list[str]) -> list[int]:
         return out
 
 def _check_triggers(user_query: str, progress: dict) -> None:
-    """사용자 질의에 '오늘 점심'이 포함되면 플래그 저장"""
     if "오늘 점심" in user_query:
         progress["_today_lunch"] = True
 
 def _maybe_today_lunch(progress: dict) -> bool:
-    """'오늘 점심' 트리거 여부 확인"""
     return progress.get("_today_lunch", False)
 
 
-# =========================
-# 메인 로직
-# =========================
 def get_ai_response(session_id: str, user_query: str):
-    """
-    메인 함수: 사용자의 질의를 받아 AI 응답을 생성
-    1) 세션 상태 관리 (슬롯 저장: location, category, purpose)
-    2) 부족한 슬롯이 있으면 버튼/텍스트로 질문
-    3) 모든 슬롯이 채워졌으면 SQL 생성 → 실행 → 결과 반환
-    4) '오늘 점심' 트리거가 있으면 간단 추천
-    """
     progress = user_progress.get(session_id, {})
 
-    # (1) "처음으로" 입력 → 세션 초기화
     if "처음으로" in user_query or "다시 시작" in user_query:
         user_progress.pop(session_id, None)
         return {"type": "text", "answer": prompts.RESET_MESSAGE, "options": None}
 
-    # (2) 트리거 확인
     _check_triggers(user_query, progress)
 
-    # (3) 새 슬롯 추출
     soft = parse_initial_query(user_query, {})
     for k in ("location", "category", "purpose"):
         if k in soft:
             progress[k] = soft[k]
 
-    # (4) 직전 질문에 대한 응답 처리
     last_q = progress.get("last_question")
     if last_q and last_q not in soft:
         progress[last_q] = user_query.strip()
@@ -369,7 +302,6 @@ def get_ai_response(session_id: str, user_query: str):
 
     user_progress[session_id] = progress
 
-    # (5) 슬롯이 다 안 채워졌으면 후속 질문
     if "location" not in progress:
         progress["last_question"] = "location"
         user_progress[session_id] = progress
@@ -389,7 +321,6 @@ def get_ai_response(session_id: str, user_query: str):
         user_progress[session_id] = progress
         return {"type": "buttons", "answer": prompts.ASK_PURPOSE, "options": prompts.PURPOSE_OPTIONS}
 
-    # (6) '오늘 점심' 트리거 → 간단 추천
     if _maybe_today_lunch(progress):
         sql = f"""
         SELECT name, category, location, rating
@@ -400,18 +331,16 @@ def get_ai_response(session_id: str, user_query: str):
         LIMIT 1;
         """
         raw = _execute_sql(sql)
-
-        # impression 로깅 + 즉시 재계산
-        names = [row[0] for row in raw]  # 첫 번째 컬럼이 name
+        names = [row[0] for row in raw]
         for rid in _names_to_ids(names):
             _log_event("impression", session_id, rid, None)
         recalc_stats()
 
-        if not raw:  # 결과 없을 때
+        if not raw:
             answer = prompts.NO_RESULT_MESSAGE.format(
                 location=progress["location"], category=progress["category"]
             )
-        else:  # 결과 있을 때
+        else:
             name, cat, loc, rating = raw[0][:4]
             answer = prompts.TODAY_LUNCH_PROMPT.format(
                 name=name, category=cat, location=loc, rating=rating
@@ -422,17 +351,17 @@ def get_ai_response(session_id: str, user_query: str):
         user_progress[session_id] = progress
         return {"type": "text", "answer": answer, "options": None}
 
-
-    # (7) 일반 추천: LLM → SQL 생성 → 실행
     try:
         question = (
             f"{progress.get('location')} 근처 {progress.get('category')} 식당을 추천해줘. "
-            f"목적은 '{progress.get('purpose')}'. 상위 평점 위주로. "
-            "반드시 단일 SELECT 문만 생성하고 ';'로 끝내. "
-            "오직 'restaurants' 테이블만 사용하고 JOIN/서브쿼리/CTE 금지. "
-            "사용 가능한 컬럼: id,name,category,location,rating,has_private_room,recommended_for. "
-            "id, name, category, location, rating 컬럼만 선택해. "
-            "location은 LIKE 부분일치만 허용(예: '%강남%'). LIMIT는 10 이하."
+            f"목적은 '{progress.get('purpose')}'. "
+            "만약 사용자가 '근처', '주변', '가까운', '지도' 등의 단어를 언급했다면 "
+            "PostGIS의 ST_Distance 함수를 사용해 위치 기반 정렬 쿼리를 생성해. "
+            "예를 들어, ST_Distance(location, ST_GeomFromText('POINT(127.0276 37.4979)', 4326)) "
+            "같은 식으로 표현하고, 가까운 순서대로 정렬해 LIMIT 10 이하로. "
+            "오직 restaurants 테이블만 사용하고, "
+            "id,name,category,location,rating 컬럼만 선택해. "
+            "JOIN/서브쿼리/CTE 금지. 단일 SELECT 문으로 끝내."
         )
         chain = create_sql_query_chain(llm, db)
         sql = chain.invoke({"question": question})
@@ -443,8 +372,6 @@ def get_ai_response(session_id: str, user_query: str):
             sql = _fallback_sql_from_slots(progress)
 
         raw = _execute_sql(sql)
-
-        # impression 로깅 + 즉시 재계산
         names = _extract_names_from_raw(raw)
         for rid in _names_to_ids(names):
             _log_event("impression", session_id, rid, None)
@@ -457,8 +384,11 @@ def get_ai_response(session_id: str, user_query: str):
             )
         else:
             rendered = _render_results(raw)
-            final_answer = rendered + prompts.ASK_SIMILAR_RESTAURANT
-
+            summary_prompt = (
+                "다음 맛집 목록을 사용자에게 자연스럽게 말하듯 요약해줘:\n" + rendered
+            )
+            natural_summary = llm.invoke(summary_prompt)
+            final_answer = natural_summary + "\n\n" + prompts.ASK_SIMILAR_RESTAURANT
 
         progress.pop("last_question", None)
         user_progress[session_id] = progress
