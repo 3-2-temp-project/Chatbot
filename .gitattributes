@@ -1,0 +1,17 @@
+# Normalize line endings across platforms
+
+# Default: treat files as text and checkout with LF on all OS
+* text=auto eol=lf
+
+# Windows-specific scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.sqlite binary
