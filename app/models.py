@@ -33,9 +33,8 @@ class ChatRequest(BaseModel):
     query: str
 
 class ChatResponse(BaseModel):
-    type: str
-    answer: str
-    options: Optional[List[str]] = None
+    response: str
+    items: list | None = None
 
 class EventRequest(BaseModel):
     session_id: str

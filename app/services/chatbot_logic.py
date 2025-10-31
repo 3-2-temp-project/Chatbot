@@ -152,21 +152,39 @@ user_progress = {}
 
 def parse_initial_query(query: str, progress: dict) -> dict:
     """
-    사용자가 입력한 문장에서 슬롯(location, category, purpose)을 추출
-    - 위치 (예: 강남역, 수원시 등)
-    - 카테고리 (한식, 중식, 일식, 양식)
-    - 목적 (오찬, 접대, 회식)
+    사용자가 입력한 문장에서 슬롯(location, people, category, purpose)을 추출
+    단, 단계가 건너뛰지 않도록 '현재 진행 중인 단계'에 따라 제한적으로 추출
     """
-    loc = re.search(r"(\S+역|\S+동|\S+시|\S+구)", query)
-    if loc:
-        progress["location"] = loc.group(0)
-    cat = re.search(r"(한식|일식|중식|양식)", query)
-    if cat:
-        progress["category"] = cat.group(0)
-    purp = re.search(r"(오찬|접대|회식)", query)
-    if purp:
-        progress["purpose"] = purp.group(0)
+    # 위치
+    if "location" not in progress:
+        loc = re.search(r"(\S+역|\S+동|\S+시|\S+구)", query)
+        if loc:
+            progress["location"] = loc.group(0)
+        return progress
+
+    # 인원수
+    if "people" not in progress:
+        people = re.search(r"(\d+)\s*명", query)
+        if people:
+            progress["people"] = int(people.group(1))
+        return progress
+
+    # 음식 종류
+    if "category" not in progress:
+        cat = re.search(r"(한식|일식|중식|양식)", query)
+        if cat:
+            progress["category"] = cat.group(0)
+        return progress
+
+    # 목적
+    if "purpose" not in progress:
+        purp = re.search(r"(오찬|접대|회식)", query)
+        if purp:
+            progress["purpose"] = purp.group(0)
+        return progress
+
     return progress
+
 
 
 # =========================
@@ -340,24 +358,26 @@ def _maybe_today_lunch(progress: dict) -> bool:
 def get_ai_response(session_id: str, user_query: str):
     """
     메인 함수: 사용자의 질의를 받아 AI 응답을 생성
-    1) 세션 상태 관리 (슬롯 저장: location, category, purpose)
-    2) 부족한 슬롯이 있으면 버튼/텍스트로 질문
-    3) 모든 슬롯이 채워졌으면 SQL 생성 → 실행 → 결과 반환
-    4) '오늘 점심' 트리거가 있으면 간단 추천
+    1️⃣ 지역 → 2️⃣ 인원수 → 3️⃣ 음식 종류 → 4️⃣ 목적 순서로 대화 진행
+    5️⃣ 모든 슬롯이 채워지면 SQL 생성 → 결과 반환
     """
     progress = user_progress.get(session_id, {})
 
     # (1) "처음으로" 입력 → 세션 초기화
     if "처음으로" in user_query or "다시 시작" in user_query:
         user_progress.pop(session_id, None)
-        return {"type": "text", "answer": prompts.RESET_MESSAGE, "options": None}
+        return {
+            "type": "text",
+            "answer": "대화를 처음부터 다시 시작할게요 🙂\n먼저 원하시는 지역을 알려주세요.",
+            "options": None
+        }
 
-    # (2) 트리거 확인
+    # (2) 트리거 확인 (오늘 점심 등)
     _check_triggers(user_query, progress)
 
     # (3) 새 슬롯 추출
     soft = parse_initial_query(user_query, {})
-    for k in ("location", "category", "purpose"):
+    for k in ("location", "people", "category", "purpose"):
         if k in soft:
             progress[k] = soft[k]
 
@@ -369,71 +389,60 @@ def get_ai_response(session_id: str, user_query: str):
 
     user_progress[session_id] = progress
 
-    # (5) 슬롯이 다 안 채워졌으면 후속 질문
+    # (5) 단계별 슬롯 질문 로직 --------------------------------
+
+    # 1️⃣ 지역
     if "location" not in progress:
         progress["last_question"] = "location"
         user_progress[session_id] = progress
-        return {"type": "text", "answer": prompts.GREETING_MESSAGE, "options": None}
+        return {
+            "type": "text",
+            "answer": "안녕하세요! 공맛집입니다 🍽️\n먼저 원하시는 지역을 알려주세요. (예: 강남역, 수원시, 홍대입구 등)",
+            "options": None
+        }
 
+    # 2️⃣ 인원수
+    if "people" not in progress:
+        progress["last_question"] = "people"
+        user_progress[session_id] = progress
+        return {
+            "type": "text",
+            "answer": f"{progress['location']} 근처에서 식사하실 인원은 몇 명인가요?",
+            "options": None
+        }
+
+    # 3️⃣ 음식 종류
     if "category" not in progress:
         progress["last_question"] = "category"
         user_progress[session_id] = progress
         return {
             "type": "buttons",
-            "answer": prompts.ASK_CATEGORY.format(location=progress["location"]),
-            "options": prompts.CATEGORY_OPTIONS,
+            "answer": "어떤 종류의 음식을 원하시나요?",
+            "options": ["한식", "중식", "일식", "양식"]
         }
 
+    # 4️⃣ 목적
     if "purpose" not in progress:
         progress["last_question"] = "purpose"
         user_progress[session_id] = progress
-        return {"type": "buttons", "answer": prompts.ASK_PURPOSE, "options": prompts.PURPOSE_OPTIONS}
+        return {
+            "type": "buttons",
+            "answer": "방문의 목적은 무엇인가요?",
+            "options": ["오찬", "회식", "접대"]
+        }
 
-    # (6) '오늘 점심' 트리거 → 간단 추천
-    if _maybe_today_lunch(progress):
-        sql = f"""
-        SELECT name, category, location, rating
-        FROM restaurants
-        WHERE location LIKE '%{_esc(progress['location'])}%'
-        AND category = '{_esc(progress['category'])}'
-        ORDER BY rating DESC
-        LIMIT 1;
-        """
-        raw = _execute_sql(sql)
-
-        # impression 로깅 + 즉시 재계산
-        names = [row[0] for row in raw]  # 첫 번째 컬럼이 name
-        for rid in _names_to_ids(names):
-            _log_event("impression", session_id, rid, None)
-        recalc_stats()
-
-        if not raw:  # 결과 없을 때
-            answer = prompts.NO_RESULT_MESSAGE.format(
-                location=progress["location"], category=progress["category"]
-            )
-        else:  # 결과 있을 때
-            name, cat, loc, rating = raw[0][:4]
-            answer = prompts.TODAY_LUNCH_PROMPT.format(
-                name=name, category=cat, location=loc, rating=rating
-            ) + prompts.ASK_SIMILAR_RESTAURANT
-
-        progress.pop("last_question", None)
-        progress.pop("_today_lunch", None)
-        user_progress[session_id] = progress
-        return {"type": "text", "answer": answer, "options": None}
-
-
-    # (7) 일반 추천: LLM → SQL 생성 → 실행
+    # ✅ 모든 슬롯이 채워졌을 때 추천 수행
     try:
         question = (
-            f"{progress.get('location')} 근처 {progress.get('category')} 식당을 추천해줘. "
-            f"목적은 '{progress.get('purpose')}'. 상위 평점 위주로. "
+            f"{progress.get('location')} 근처에서 {progress.get('people')}명이 먹기 좋은 "
+            f"{progress.get('category')} 식당을 추천해줘. 목적은 '{progress.get('purpose')}'. "
             "반드시 단일 SELECT 문만 생성하고 ';'로 끝내. "
             "오직 'restaurants' 테이블만 사용하고 JOIN/서브쿼리/CTE 금지. "
             "사용 가능한 컬럼: id,name,category,location,rating,has_private_room,recommended_for. "
             "id, name, category, location, rating 컬럼만 선택해. "
             "location은 LIKE 부분일치만 허용(예: '%강남%'). LIMIT는 10 이하."
         )
+
         chain = create_sql_query_chain(llm, db)
         sql = chain.invoke({"question": question})
         sql = sql.strip().strip("```").replace("sql", "").strip()
@@ -450,21 +459,37 @@ def get_ai_response(session_id: str, user_query: str):
             _log_event("impression", session_id, rid, None)
         recalc_stats()
 
+        # 결과가 없을 때
         if not raw:
-            final_answer = prompts.NO_RESULT_MESSAGE.format(
-                location=progress.get("location"),
-                category=progress.get("category"),
-            )
+            final_answer = f"죄송합니다 😢 {progress['location']} 근처에서 조건에 맞는 맛집을 찾지 못했어요.\n다른 조건으로 다시 시도해볼까요?"
+            items = []
         else:
             rendered = _render_results(raw)
-            final_answer = rendered + prompts.ASK_SIMILAR_RESTAURANT
+            final_answer = f"다음 맛집들을 추천드릴게요! 👇\n{rendered}"
 
+            # ✅ items 리스트로 지도에 넘길 데이터 구성
+            items = [
+                {
+                    "name": row[0],
+                    "category": row[1],
+                    "location": row[2],
+                    "rating": row[3]
+                }
+                for row in raw
+            ]
 
         progress.pop("last_question", None)
         user_progress[session_id] = progress
-        return {"type": "text", "answer": final_answer, "options": None}
+
+        # ✅ items 함께 반환
+        return {
+            "type": "text",
+            "answer": final_answer,
+            "items": items,
+            "options": None
+        }
 
     except Exception as e:
         print(f"[Agent Error] {e}")
         user_progress[session_id] = progress
-        return {"type": "text", "answer": prompts.ERROR_MESSAGE, "options": None}
+        return {"type": "text", "answer": "서버 내부 오류가 발생했습니다.", "options": None}
