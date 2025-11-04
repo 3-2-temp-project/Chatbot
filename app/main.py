@@ -63,9 +63,15 @@ async def chat_with_agent(request: ChatRequest):
         raise HTTPException(status_code=400, detail="session_id와 query를 모두 입력해주세요.")
     try:
         ai_response = get_ai_response(request.session_id, request.query)
-        return ai_response
+
+        # ✅ 프론트엔드에 맞게 변환
+        return {
+            "response": ai_response.get("answer", ""),   # <-- 기존 answer 키를 response로 전달
+            "items": ai_response.get("options") or [],   # items 필드도 같이 보내기
+        }
+
     except Exception as e:
-        print(f"Server Error: {e}")
+        print(f"[Server Error] {e}")
         raise HTTPException(status_code=500, detail=f"서버 오류 발생: {str(e)}")
 
 # 이벤트
