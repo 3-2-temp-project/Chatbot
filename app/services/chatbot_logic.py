@@ -6,8 +6,7 @@ from langchain_huggingface import HuggingFacePipeline
 from langchain.chains import create_sql_query_chain
 
 from app.core import config
-import app.services.prompts as prompts
-
+import app.services.prompts as prompts  # (사용 안 할 수도 있지만 원본 유지)
 
 # =========================
 # DB & LLM 준비
@@ -23,7 +22,8 @@ llm = HuggingFacePipeline.from_model_id(
         "do_sample": True if config.LLM_TEMPERATURE > 0 else False,
         "return_full_text": False,
     },
-    device=0,
+    # ✅ GPU/CPU 자동 감지값 사용 (원래 device=0 고정 → 변경)
+    device=config.DEVICE,
 )
 
 
@@ -149,7 +149,6 @@ user_progress = {}
 # =========================
 # 유틸: 질의 파싱
 # =========================
-
 def parse_initial_query(query: str, progress: dict) -> dict:
     """
     사용자가 입력한 문장에서 슬롯(location, people, category, purpose)을 추출
@@ -184,7 +183,6 @@ def parse_initial_query(query: str, progress: dict) -> dict:
         return progress
 
     return progress
-
 
 
 # =========================
@@ -248,7 +246,6 @@ def recalc_stats():
         """)
 
 
-
 # =========================
 # SQL 가드레일 & 폴백
 # =========================
@@ -298,6 +295,34 @@ def _render_results(rows: list[tuple]) -> str:
 def _esc(v: str) -> str:
     """SQL 인젝션 방지를 위해 작은 따옴표 이스케이프"""
     return str(v).replace("'", "''")[:50] if v else ""
+
+
+# === (추가) 지도용 위경도 보강: 이름으로 restaurant_info에서 lat/lng 조회 ===
+def _fetch_geo_map_by_names(names: list[str]) -> dict[str, dict]:
+    """
+    restaurant_info.res_name 기준으로 address/lat/lng를 딕셔너리로 반환
+    예: {"새벽집 강남": {"address":"...", "lat": 37.49, "lng":127.02}, ...}
+    """
+    if not names:
+        return {}
+    engine = create_engine(config.DATABASE_URI)
+
+    # 환경 호환을 위해 IN 바인딩 방식 사용
+    placeholders = ", ".join([f":n{i}" for i in range(len(names))])
+    q = text(f"""
+        SELECT res_name, address, lat, lng
+        FROM restaurant_info
+        WHERE res_name IN ({placeholders})
+    """)
+    params = {f"n{i}": n for i, n in enumerate(names)}
+
+    geo = {}
+    with engine.begin() as conn:
+        rows = conn.execute(q, params).fetchall()
+        for rn, addr, lat, lng in rows:
+            geo[str(rn)] = {"address": addr, "lat": float(lat), "lng": float(lng)}
+    return geo
+
 
 def _fallback_sql_from_slots(progress: dict) -> str:
     """
@@ -359,7 +384,7 @@ def get_ai_response(session_id: str, user_query: str):
     """
     메인 함수: 사용자의 질의를 받아 AI 응답을 생성
     1️⃣ 지역 → 2️⃣ 인원수 → 3️⃣ 음식 종류 → 4️⃣ 목적 순서로 대화 진행
-    5️⃣ 모든 슬롯이 채워지면 SQL 생성 → 결과 반환
+    5️⃣ 모든 슬롯이 채워지면 SQL 생성 → 결과 반환 (+ 지도용 lat/lng 보강)
     """
     progress = user_progress.get(session_id, {})
 
@@ -461,32 +486,49 @@ def get_ai_response(session_id: str, user_query: str):
 
         # 결과가 없을 때
         if not raw:
-            final_answer = f"죄송합니다 😢 {progress['location']} 근처에서 조건에 맞는 맛집을 찾지 못했어요.\n다른 조건으로 다시 시도해볼까요?"
+            final_answer = (
+                f"죄송합니다 😢 {progress['location']} 근처에서 조건에 맞는 맛집을 찾지 못했어요.\n"
+                f"- 조건: 인원 {progress.get('people')}명, 카테고리 {progress.get('category')}, 목적 {progress.get('purpose')}\n"
+                "검색 범위를 넓히거나 다른 카테고리로 다시 시도해볼까요?"
+            )
             items = []
         else:
             rendered = _render_results(raw)
-            final_answer = f"다음 맛집들을 추천드릴게요! 👇\n{rendered}"
+            final_answer = (
+                "다음 추천을 준비했어요! 👇\n"
+                f"{rendered}\n\n"
+                "지도로 위치를 함께 보시려면 각 항목의 **지도로 이동** 버튼을 눌러주세요."
+            )
 
-            # ✅ items 리스트로 지도에 넘길 데이터 구성
-            items = [
-                {
-                    "name": row[0],
-                    "category": row[1],
-                    "location": row[2],
-                    "rating": row[3]
-                }
-                for row in raw
-            ]
+            # ✅ 지도용 데이터 구성: 이름으로 restaurant_info에서 address/lat/lng 보강
+            geo_map = _fetch_geo_map_by_names(names)
+
+            # raw: (id, name, category, location, rating)
+            items = []
+            for r in raw:
+                _id, name, category, location, rating = r[:5]
+                geo = geo_map.get(str(name))
+                # 지도에 찍으려면 lat/lng가 있어야 하므로, 없는 경우도 일단 포함(프론트에서 필터 가능)
+                items.append({
+                    "id": int(_id),
+                    "name": str(name),
+                    "address": (geo.get("address") if geo else None) or str(location),
+                    "lat": (geo.get("lat") if geo else None),
+                    "lng": (geo.get("lng") if geo else None),
+                    "category": str(category) if category is not None else None,
+                    "price": None,
+                    "score": float(rating) if rating is not None else None,
+                })
 
         progress.pop("last_question", None)
         user_progress[session_id] = progress
 
-        # ✅ items 함께 반환
+        # ✅ 프론트 호환: 새(items) + 구(options) 둘 다 내려주면 안전
         return {
             "type": "text",
             "answer": final_answer,
             "items": items,
-            "options": None
+            "options": items,
         }
 
     except Exception as e:
