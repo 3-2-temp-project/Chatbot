@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-import torch  # GPU 감지용
 
 # === BASE_DIR 설정 ===
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -26,9 +25,10 @@ LLM_MAX_NEW_TOKENS = int(os.getenv("LLM_MAX_NEW_TOKENS", "64"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 
 # ===== 디바이스 자동 감지 =====
-if torch.cuda.is_available():
-    DEVICE = 0   # 첫 번째 GPU
-    print("[INFO] GPU 감지됨 → CUDA device=0")
-else:
-    DEVICE = -1  # CPU
-    print("[INFO] GPU 없음 → CPU 사용")
+try:
+    import torch  # type: ignore
+    DEVICE = 0 if torch.cuda.is_available() else -1
+except Exception:
+    DEVICE = -1
+
+print(f"[INFO] DEVICE={'CUDA:0' if DEVICE==0 else 'CPU'}")
