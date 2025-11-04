@@ -1,4 +1,3 @@
-import sys
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -9,21 +8,24 @@ from app.services.chatbot_logic import get_ai_response, _log_event, recalc_stats
 from app.models import ChatRequest, ChatResponse, EventRequest, db
 from app.core.config import DATABASE_URI
 
+# (테이블 초기화는 운영 안전을 위해 기본 비활성)
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+from flask_sqlalchemy import SQLAlchemy  # noqa
 
-# ===== Flask + DB 초기화 (FastAPI와 같이 사용) =====
 flask_app = Flask(__name__)
 flask_app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
 flask_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(flask_app)
-with flask_app.app_context():
-    db.create_all()
+
+# 환경변수로만 부트스트랩 허용
+if os.getenv("DB_BOOTSTRAP", "false").lower() == "true":
+    with flask_app.app_context():
+        db.create_all()
 
 # ===== FastAPI =====
 app = FastAPI(
     title="지능형 맛집 추천 AI 챗봇 API",
-    description="LangChain과 Text-to-SQL을 사용한 맛집 추천 챗봇입니다.",
+    description="LangChain + Text-to-SQL 기반 맛집 추천 챗봇",
     version="1.0.0",
 )
 
@@ -45,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 정적 데모 서빙
+# 정적 데모 (선택)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/demo", StaticFiles(directory=STATIC_DIR, html=True), name="demo")
 
@@ -62,14 +64,12 @@ async def chat_with_agent(request: ChatRequest):
     if not request.query or not request.session_id:
         raise HTTPException(status_code=400, detail="session_id와 query를 모두 입력해주세요.")
     try:
-        ai_response = get_ai_response(request.session_id, request.query)
-
-        # ✅ 프론트엔드에 맞게 변환
+        ai = get_ai_response(request.session_id, request.query)
+        # 새/구 로직 모두 호환 (items 우선, 없으면 options 사용)
         return {
-            "response": ai_response.get("answer", ""),   # <-- 기존 answer 키를 response로 전달
-            "items": ai_response.get("options") or [],   # items 필드도 같이 보내기
+            "response": ai.get("answer", ""),
+            "items": ai.get("items") or ai.get("options") or [],
         }
-
     except Exception as e:
         print(f"[Server Error] {e}")
         raise HTTPException(status_code=500, detail=f"서버 오류 발생: {str(e)}")
@@ -86,7 +86,6 @@ async def push_event(req: EventRequest):
         print("[/event error]", e)
         raise HTTPException(status_code=500, detail="event log failed")
 
-# 상태 확인
 @app.get("/", summary="API 상태 확인")
 def read_root():
     return {"message": "지능형 맛집 추천 AI 챗봇 API가 동작 중입니다."}
