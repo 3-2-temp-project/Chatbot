@@ -1,11 +1,6 @@
 # Chatbot
 수원대학교 2025-2학기 시스템보안프로젝트 AI_Chatbot
 
-# 가상 환경 활성화 
-python -m venv venv
-
-.\venv\Scripts\activate
-
 # 라이브러리 설치
 pip install -r requirements.txt
 
