@@ -12,7 +12,6 @@ requests
 safetensors
 scikit-learn
 sentence-transformers
-SQLAlchemy
 starlette
 transformers
 uvicorn[standard]
@@ -24,6 +23,7 @@ torchaudio
 --extra-index-url https://download.pytorch.org/whl/cu121
 
 # === Database ===
-Flask
-Flask-SQLAlchemy
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy
 psycopg2-binary
