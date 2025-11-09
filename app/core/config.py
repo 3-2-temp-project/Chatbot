@@ -12,7 +12,7 @@ load_dotenv(BASE_DIR / ".env")
 DATABASE_URI = os.getenv("DATABASE_URL")
 
 # ===== Redis =====
-REDIS_URL = os.getenv("REDIS_URL")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 # ===== GeoCoding & 캐싱 설정 =====
 GEOCODE_TTL_SECONDS = int(os.getenv("GEOCODE_TTL_SECONDS", "2592000"))
