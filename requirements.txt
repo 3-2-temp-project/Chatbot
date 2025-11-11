@@ -1,29 +1,31 @@
 # === Core ===
-accelerate
-fastapi
-langchain
-langchain-community
-langchain-huggingface
-numpy
-pydantic
-PyYAML
-python-dotenv
-requests
-safetensors
-scikit-learn
-sentence-transformers
-SQLAlchemy
-starlette
-transformers
-uvicorn[standard]
+langchain==0.2.14
+langchain-core==0.2.36
+langchain-community==0.2.11
+langchain-huggingface==0.0.3
+langchain-text-splitters==0.2.2
+numpy==1.26.4
+tenacity==8.5.0
+packaging==24.2
+langsmith==0.1.147
+PyYAML>=6.0
+SQLAlchemy>=2.0
+pydantic>=2.0
+python-dotenv>=1.0.1
+requests>=2.32.0
 
-# === PyTorch (CUDA 12.1) ===
-torch
-torchvision
-torchaudio
+# === AI & Torch ===
+transformers>=4.45.0
+accelerate>=0.27.0
+torch>=2.3.1
+torchvision>=0.18.1
+torchaudio>=2.3.1
 --extra-index-url https://download.pytorch.org/whl/cu121
 
-# === Database ===
-Flask
-Flask-SQLAlchemy
-psycopg2-binary
+# === Web & DB ===
+Flask>=3.0.3
+Flask-SQLAlchemy>=3.1.1
+psycopg2-binary>=2.9.9
+fastapi>=0.115.0
+uvicorn[standard]>=0.31.0
+starlette>=0.41.0
