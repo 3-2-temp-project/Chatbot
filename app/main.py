@@ -18,7 +18,8 @@ from starlette.requests import Request
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy  # noqa: F401  (실제 객체는 app.models.db 사용)
 
-from app.services.chatbot_logic import get_ai_response, _log_event, recalc_stats
+from app.services.chatbot_logic import get_ai_response
+from app.services.events import log_event, recalc_stats
 from app.models import ChatRequest, ChatResponse, EventRequest, db
 
 # ─────────────────────────────────────────────────────────────────────────────
