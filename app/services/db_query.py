@@ -2,8 +2,6 @@
 DB 조회 / 위치정보 조회 / ID 변환 / 결과 포맷 모듈
 """
 
-# app/services/db_query.py
-
 from sqlalchemy import text
 from app.services.sql_builder import _ENGINE
 
