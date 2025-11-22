@@ -20,15 +20,13 @@ GEOCODE_TTL_SECONDS = int(os.getenv("GEOCODE_TTL_SECONDS", "2592000"))
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 
 # ===== LLM 설정 =====
-LLM_MODEL_ID = os.getenv("LLM_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
-LLM_TASK = "text-generation"
+LLM_MODEL_ID = os.getenv("LLM_MODEL_ID", "google/flan-t5-small")
+LLM_TASK = "text2text-generation" 
 LLM_MAX_NEW_TOKENS = int(os.getenv("LLM_MAX_NEW_TOKENS", "64"))
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0"))
 
 # ===== 디바이스 자동 감지 =====
 if torch.cuda.is_available():
-    DEVICE = 0   # 첫 번째 GPU
-    print("[INFO] GPU 감지됨 → CUDA device=0")
+    DEVICE = 0
 else:
     DEVICE = -1  # CPU
-    print("[INFO] GPU 없음 → CPU 사용")
