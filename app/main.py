@@ -48,22 +48,29 @@ app.add_middleware(
 
 
 #  /chat  → 챗봇 메인 API
-@app.post("/chat", response_model=ChatResponse, summary="챗봇 응답 생성")
+@app.post("/chat", response_model=ChatResponse)
 async def chat_with_agent(request: ChatRequest):
-    if not request.query or not request.session_id:
-        raise HTTPException(status_code=400, detail="session_id와 query를 모두 입력해주세요.")
+
+    # 🔥 query 사용 안 함 → location + category 기반
+    if not request.session_id:
+        raise HTTPException(status_code=400, detail="session_id가 필요합니다.")
 
     try:
-        ai_response = get_ai_response(request.session_id, request.query)
+        ai_response = get_ai_response(
+            session_id=request.session_id,
+            location=request.location,
+            category=request.category
+        )
 
         return {
-            "response": ai_response.get("answer", ""),
-            "items": ai_response.get("options") or []
+            "response": ai_response.get("response", ""),
+            "items": ai_response.get("items", []),
         }
 
     except Exception as e:
-        print(f"[Server Error] {e}")
-        raise HTTPException(status_code=500, detail=f"서버 오류 발생: {str(e)}")
+        print("[Server Error]", e)
+        raise HTTPException(status_code=500, detail=f"서버 오류 발생: {e}")
+
 
 
 #  /event → 클릭/좋아요 등 로그 저장

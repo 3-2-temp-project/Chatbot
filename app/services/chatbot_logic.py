@@ -55,6 +55,13 @@ user_progress: Dict[str, Dict[str, Any]] = {}
 # 추천 SQL 실행
 # ───────────────────────────────────────────────
 def _execute_recommend_sql(location: str, category: str) -> List[Tuple]:
+    print("────────────────────────────────────────────")
+    print("🚀 SQL 실행 시작")
+    print("📌 location =", repr(location))
+    print("📌 category =", repr(category))
+    print("📌 LIKE =", repr(f"%{location}%"))
+    print("🔎 실제 SQL 조건: address LIKE '%{}%' AND category='{}'".format(location, category))
+
     sql = text("""
     SELECT 
         res_id AS id,
@@ -64,77 +71,51 @@ def _execute_recommend_sql(location: str, category: str) -> List[Tuple]:
         lat,
         lng
     FROM restaurant_info
-    WHERE address LIKE :loc
-      AND category = :cat
+    WHERE TRIM(address) LIKE :loc
+      AND TRIM(category) = :cat
     LIMIT 10;
-""")
+    """)
 
     with _ENGINE.begin() as conn:
-        return conn.execute(sql, {
+        rows = conn.execute(sql, {
             "loc": f"%{location}%",
             "cat": category
         }).fetchall()
 
+    print("📌 SQL 결과 개수 =", len(rows))
+    for row in rows:
+        print("➡️ 결과 Row =", row)
+
+    print("────────────────────────────────────────────")
+    return rows
 
 # ───────────────────────────────────────────────
 # 메인 처리 로직
 # ───────────────────────────────────────────────
-def get_ai_response(session_id: str, user_query: str) -> Dict[str, Any]:
-    """
-    프론트가 버튼 기반으로 user_query를 보냄
-    서버는 이를 순서대로 저장하고
-    모든 항목이 채워지면 SQL 추천을 수행
-    """
+def get_ai_response(session_id: str, location: str | None, category: str | None):
 
-    progress = user_progress.get(session_id, {})
-
-    # 1️⃣ 지역 선택
-    if "location" not in progress:
-        progress["location"] = user_query
-        user_progress[session_id] = progress
-        return {"type": "progress"}  # 프론트가 단계 전환
-
-    # 2️⃣ 인원 선택
-    if "people" not in progress:
-        progress["people"] = user_query
-        user_progress[session_id] = progress
-        return {"type": "progress"}
-
-    # 3️⃣ 카테고리 선택 → 추천 실행
-    if "category" not in progress:
-        progress["category"] = user_query
-        user_progress[session_id] = progress
-
-        location = progress["location"]
-        category = progress["category"]
-
+    # 둘 다 있어야 실제 쿼리 실행
+    if location and category:
         rows = _execute_recommend_sql(location, category)
 
-        if not rows:
-            return {
-                "type": "recommend",
-                "items": []
-            }
-
-        # 결과 구성
-        items = []
-        for _id, name, category, address, lat, lng in rows:
-            items.append({
-                "id": _id,
-                "name": name,
-                "address": address,
-                "lat": float(lat),
-                "lng": float(lng),
-                "category": category,
-                "score": None,   # rating 없음 → None
-            })
-
         return {
-            "type": "recommend",
-            "items": items
+            "response": "추천 결과",
+            "items": [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "category": r[2],
+                    "address": r[3],
+                    "lat": float(r[4]),
+                    "lng": float(r[5]),
+                }
+                for r in rows
+            ],
         }
 
-    # 이후 단계라면 초기화 안내 가능
-    return {
-        "type": "done",
-    }
+    # 위치만 있는 경우 → 다음 버튼 출력
+    if location and not category:
+        return { "response": "카테고리를 선택해주세요", "items": [] }
+
+    # 첫 진입
+    return { "response": "위치를 선택해주세요", "items": [] }

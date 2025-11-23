@@ -30,7 +30,8 @@ class User(db.Model):
 # ===== FastAPI Request/Response 모델 =====
 class ChatRequest(BaseModel):
     session_id: str
-    query: str
+    location: str | None = None
+    category: str | None = None
 
 class ChatResponse(BaseModel):
     response: str
